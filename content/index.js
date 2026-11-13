@@ -12,6 +12,8 @@ var state = {
   html: '',
   markdown: '',
   toc: '',
+  preserveScroll: null,
+  editorScroll: 0,
   reload: {
     interval: null,
     ms: 1000,
@@ -54,6 +56,68 @@ var state = {
   }
 }
 
+var readSource = () => new Promise((resolve, reject) => {
+  chrome.runtime.sendMessage({
+    message: 'source.snapshot',
+    location: location.href.replace(/#.*$/, ''),
+  }, (res) => {
+    if (chrome.runtime.lastError) {
+      reject(new Error(chrome.runtime.lastError.message))
+    }
+    else if (!res || res.err || !res.snapshot) {
+      reject(new Error(res && res.err ? res.err : '没有取得源文件快照'))
+    }
+    else {
+      resolve(res.snapshot)
+    }
+  })
+})
+
+var editor = mdEditor.create({
+  initial: $('pre') ? $('pre').innerText : '',
+  filename: decodeURIComponent(location.pathname.split('/').pop() || 'markdown.md'),
+  read: readSource,
+  write: mdFileWriter.save,
+  canWrite: mdFileWriter.canWrite,
+  preview: (md) => render(md),
+  replace: (md) => {
+    var textarea = $('#_editor-input')
+    if (textarea) textarea.value = md
+  },
+  confirm: (message) => window.confirm(message),
+  onChange: () => m.redraw(),
+})
+
+window.addEventListener('beforeunload', editor.beforeUnload)
+
+document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && editor.state.active) {
+    event.preventDefault()
+    if (!event.repeat) editor.save()
+  }
+})
+
+var toggleEditor = async () => {
+  if (editor.state.active) {
+    state.preserveScroll = state.editorScroll
+    editor.exit()
+    return
+  }
+  state.editorScroll = window.scrollY
+  await editor.enter()
+  if (editor.state.active) {
+    requestAnimationFrame(() => {
+      var textarea = $('#_editor-input')
+      if (textarea) textarea.focus()
+    })
+  }
+}
+
+var saveEditor = (force) => {
+  if (force && !window.confirm('磁盘文件已被外部修改。仍要用当前草稿覆盖它吗？')) return
+  editor.save(force)
+}
+
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
   if (req.message === 'reload') {
     location.reload(true)
@@ -79,7 +143,10 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 var oncreate = {
   html: () => {
     update()
-  }
+  },
+  editor: (vnode) => {
+    vnode.dom.value = editor.state.draft
+  },
 }
 
 var onupdate = {
@@ -97,7 +164,16 @@ var onupdate = {
 }
 
 var update = (update) => {
-  scroll(update)
+  if (state.preserveScroll !== null) {
+    var offset = state.preserveScroll
+    state.preserveScroll = null
+    if ($('#_html')) $('#_html').style.visibility = 'visible'
+    if ($('#_toc') && !state.raw) $('#_toc').style.visibility = 'visible'
+    requestAnimationFrame(() => window.scrollTo(0, offset))
+  }
+  else {
+    scroll(update)
+  }
 
   if (state.content.syntax) {
     setTimeout(() => Prism.highlightAll(), 20)
@@ -112,13 +188,20 @@ var update = (update) => {
   }
 }
 
+var renderSequence = mdEditor.latest()
 var render = (md) => {
+  var sequence = renderSequence.next()
   state.markdown = md
   chrome.runtime.sendMessage({
     message: 'markdown',
     compiler: state.compiler,
     markdown: frontmatter(state.markdown)
   }, (res) => {
+    if (!renderSequence.isCurrent(sequence)) return
+    if (chrome.runtime.lastError || !res) {
+      console.error(chrome.runtime.lastError || 'Markdown 编译失败')
+      return
+    }
     state.html = res.html
     if (state.content.emoji) {
       state.html = emojinator(state.html)
@@ -134,6 +217,9 @@ var render = (md) => {
     }
     state.html = anchors(state.html)
     m.redraw()
+    if (!editor.state.active && state.preserveScroll !== null) {
+      update()
+    }
   })
 }
 
@@ -149,7 +235,7 @@ function mount () {
     view: () => {
       var dom = []
 
-      if (state.html) {
+      if (state.html || editor.state.active) {
         state._themes.custom = state.custom.color
 
         var color =
@@ -158,6 +244,7 @@ function mount () {
           ? 'dark' : 'light'
 
         $('body').classList.remove(...Array.from($('body').classList).filter((name) => /^_theme|_color/.test(name)))
+        $('body').classList.toggle('_editing', editor.state.active)
         dom.push(m('link#_theme', {
           onupdate: onupdate.theme,
           rel: 'stylesheet', type: 'text/css',
@@ -176,7 +263,22 @@ function mount () {
           (/github(-dark)?/.test(state.theme) ? 'markdown-body' : 'markdown-theme') +
           (state.themes.width !== 'auto' ? ` _width-${state.themes.width}` : '')
 
-        if (state.raw) {
+        if (editor.state.active) {
+          dom.push(m('textarea#_editor-input', {
+            key: 'markdown-source-editor',
+            class: theme,
+            spellcheck: false,
+            'aria-label': 'Markdown 源码',
+            oncreate: oncreate.editor,
+            oninput: (event) => {
+              var dirty = editor.state.dirty
+              event.redraw = false
+              editor.input(event.target.value)
+              if (!dirty) m.redraw()
+            },
+          }))
+        }
+        else if (state.raw) {
           if (state.content.syntax) {
             dom.push(m('#_markdown', {oncreate: oncreate.html, onupdate: onupdate.html, class: theme},
               m.trust(`<pre class="language-md"><code class="language-md">${_escape(state.markdown)}</code></pre>`)
@@ -192,14 +294,51 @@ function mount () {
           ))
         }
 
-        if (state.content.toc) {
+        if (state.content.toc && !editor.state.active) {
           dom.push(m('#_toc.tex2jax-ignore', m.trust(state.toc)))
           state.raw ? $('body').classList.remove('_toc-left') : $('body').classList.add('_toc-left')
+        }
+        else {
+          $('body').classList.remove('_toc-left')
         }
 
         if (state.theme === 'custom') {
           dom.push(m('style', {type: 'text/css'}, state.custom.theme))
         }
+
+        dom.push(m('#_editor-controls', [
+          m('button#_editor-toggle', {
+            type: 'button',
+            disabled: editor.state.busy,
+            onclick: toggleEditor,
+          }, editor.state.busy ? '读取中…' : (editor.state.active ? '退出编辑' : '编辑')),
+          editor.state.active && mdFileWriter.canWrite() && m('button#_editor-save', {
+            type: 'button',
+            title: 'Ctrl/Cmd+S',
+            disabled: editor.state.saving || (!editor.state.dirty && !editor.state.external),
+            onclick: () => saveEditor(false),
+          }, editor.state.saving ? '保存中…' : '保存'),
+          editor.state.active && m('button#_editor-export', {
+            type: 'button',
+            onclick: editor.exportCopy,
+          }, '导出副本'),
+          editor.state.active && editor.state.external && m('button#_editor-load-external', {
+            type: 'button',
+            onclick: editor.loadExternal,
+          }, '载入磁盘版本'),
+          editor.state.active && mdFileWriter.canWrite() && editor.state.external && m('button#_editor-force-save', {
+            type: 'button',
+            onclick: () => saveEditor(true),
+          }, '仍要覆盖'),
+          editor.state.active && editor.state.external && m('button#_editor-keep-draft', {
+            type: 'button',
+            onclick: editor.keepDraft,
+          }, '保留草稿'),
+          m('span#_editor-status', {
+            role: 'status',
+            'aria-live': 'polite',
+          }, editor.state.status),
+        ]))
       }
 
       return dom

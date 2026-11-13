@@ -25,6 +25,11 @@ md.messages = ({storage: {defaults, state, set}, compilers, mathjax, xhr, webreq
         sendResponse({err, body})
       })
     }
+    else if (req.message === 'source.snapshot') {
+      xhr.snapshot(req.location, (err, snapshot) => {
+        sendResponse({err: err ? (err.message || String(err)) : null, snapshot})
+      })
+    }
     else if (req.message === 'prism') {
       chrome.scripting.executeScript({
         target: {tabId: sender.tab.id},

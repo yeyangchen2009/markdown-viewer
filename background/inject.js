@@ -27,6 +27,18 @@ md.inject = ({storage: {state}}) => (id) => {
     ]
   })
 
+  if (!/Firefox/.test(navigator.userAgent)) {
+    chrome.scripting.executeScript({
+      target: {tabId: id},
+      files: [
+        '/content/file-writer.js',
+        '/content/file-writer-main.js',
+      ],
+      world: 'MAIN',
+      injectImmediately: true
+    }).catch((err) => console.warn('[Markdown Viewer] 本地写回组件注入失败：', err))
+  }
+
   chrome.scripting.executeScript({
     target: {tabId: id},
     files: [
@@ -35,6 +47,8 @@ md.inject = ({storage: {state}}) => (id) => {
       state.content.emoji && '/content/emoji.js',
       state.content.mermaid && ['/vendor/mermaid.min.js', '/vendor/panzoom.min.js', '/content/mermaid.js'],
       state.content.mathjax && ['/content/mathjax.js', '/vendor/mathjax/tex-mml-chtml.js'],
+      '/content/file-writer.js',
+      '/content/editor.js',
       '/content/index.js',
       '/content/scroll.js',
       state.content.autoreload && '/content/autoreload.js',
