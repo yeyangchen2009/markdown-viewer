@@ -40,9 +40,10 @@ const extensionId = async (context) => {
   throw new Error('扩展 Service Worker 未启动')
 }
 
-const completeNativePicker = (filename) => new Promise((resolve, reject) => {
+const completeNativeFileAccess = (filename, mode) => new Promise((resolve, reject) => {
   const script = `
 $ErrorActionPreference = 'Stop'
+if ('${mode}' -notin @('picker', 'write')) { throw 'Unknown native helper mode' }
 $log = '${work.replace(/'/g, "''")}\\native-picker.log'
 try {
   Add-Type -AssemblyName UIAutomationClient
@@ -69,7 +70,8 @@ public static class MDVDialog {
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint message, IntPtr wParam, IntPtr lParam);
 }
 '@
-  'helper started' | Out-File -FilePath $log -Encoding utf8
+  'helper started: ${mode}' | Out-File -FilePath $log -Encoding utf8
+  if ('${mode}' -eq 'picker') {
   $pattern = 'Open|Select|' + [char]0x6253 + [char]0x5f00 + '|' + [char]0x9009 + [char]0x53d6 + '|' + [char]0x9009 + [char]0x62e9
   $found = $false
   $seen = @{}
@@ -140,6 +142,8 @@ public static class MDVDialog {
   'open invoked; hwnd=' + $open.Current.NativeWindowHandle | Out-File -FilePath $log -Append -Encoding utf8
   Start-Sleep -Milliseconds 700
   ('dialog still visible=' + [MDVDialog]::IsWindowVisible($hwnd)) | Out-File -FilePath $log -Append -Encoding utf8
+  }
+  if ('${mode}' -eq 'write') {
   $script:browserHwnd = [IntPtr]::Zero
   for ($i = 0; $i -lt 40 -and $script:browserHwnd -eq [IntPtr]::Zero; $i++) {
     $browserCallback = [MDVDialog+EnumWindowsProc] {
@@ -207,6 +211,7 @@ public static class MDVDialog {
     else {
       ('write permission button not found; windows=' + ($permissionSeen.Keys -join ' | ')) | Out-File -FilePath $log -Append -Encoding utf8
     }
+  }
   }
 }
 catch {
@@ -315,7 +320,48 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   assert.equal(await page.evaluate(() => document.documentElement.dataset.mdFileWriter), 'ready')
 
   await page.evaluate(() => window.scrollTo(0, 600))
+  await page.evaluate(() => {
+    window.__writerEvents = []
+    document.addEventListener('md:source-file-save-request', (event) => {
+      window.__writerEvents.push({
+        type: 'request', detail: Boolean(event.detail), keys: event.detail ? Object.keys(event.detail) : [],
+        name: event.detail && event.detail.expectedName,
+        prepare: event.detail && event.detail.prepare,
+      })
+    })
+    document.addEventListener('md:source-file-save-response', (event) => {
+      window.__writerEvents.push({type: 'response', detail: event.detail})
+    })
+  })
+  const picker = completeNativeFileAccess(filename, 'picker').then(() => page.bringToFront())
   await page.locator('#_editor-toggle').click()
+  await Promise.all([waitStatus(page, '已选择当前文件；之后保存不再选路径'), picker]).catch(async (error) => {
+    console.error('prepare diagnostics', await page.evaluate(() => ({
+      status: document.querySelector('#_editor-status')?.textContent,
+      body: document.body.innerText.slice(-500),
+      writer: document.documentElement.dataset.mdFileWriter,
+      active: navigator.userActivation?.isActive,
+    })), errors)
+    console.error('writer events', await page.evaluate(() => window.__writerEvents))
+    const diagnostics = await context.newPage()
+    await diagnostics.goto(`chrome-extension://${id}/popup/index.html`)
+    console.error('isolated editor', await diagnostics.evaluate(async (url) => {
+      const [tab] = await chrome.tabs.query({url})
+      if (!tab) return {error: 'tab not found'}
+      const [result] = await chrome.scripting.executeScript({
+        target: {tabId: tab.id},
+        func: () => ({
+          writer: typeof mdFileWriter === 'undefined' ? null : Object.keys(mdFileWriter),
+          editor: typeof editor === 'undefined' ? null : editor.state,
+          statusCount: document.querySelectorAll('#_editor-status').length,
+        }),
+      })
+      return result.result
+    }, pathToFileURL(filename).href))
+    await diagnostics.close()
+    await page.screenshot({path: path.join(work, 'prepare-failure.png')})
+    throw error
+  })
   const textarea = page.locator('#_editor-input')
   await textarea.waitFor()
   assert.equal(await textarea.inputValue(), initial)
@@ -340,21 +386,9 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
 
   const first = `# 已修改\n\n中文 IME\n\n${paragraphs}`
   await textarea.fill(first)
-  await page.evaluate(() => {
-    window.__writerEvents = []
-    document.addEventListener('md:source-file-save-request', (event) => {
-      window.__writerEvents.push({
-        type: 'request', detail: Boolean(event.detail), keys: event.detail ? Object.keys(event.detail) : [],
-        name: event.detail && event.detail.expectedName,
-      })
-    })
-    document.addEventListener('md:source-file-save-response', (event) => {
-      window.__writerEvents.push({type: 'response', detail: event.detail})
-    })
-  })
-  const picker = completeNativePicker(filename).then(() => page.bringToFront())
+  const writePermission = completeNativeFileAccess(filename, 'write').then(() => page.bringToFront())
   await page.locator('#_editor-save').click()
-  await Promise.all([waitStatus(page, '已保存原文件'), picker]).catch(async (error) => {
+  await Promise.all([waitStatus(page, '已保存原文件'), writePermission]).catch(async (error) => {
     console.error('first save diagnostics', await page.locator('#_editor-status').textContent(), errors)
     console.error('writer events', await page.evaluate(() => window.__writerEvents))
     await page.screenshot({path: path.join(work, 'first-save-failure.png')})
@@ -362,6 +396,9 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   })
   assert.equal(fs.readFileSync(filename).equals(sourceBytes(first)), true, '首次保存必须覆盖真实磁盘并保留 BOM/CRLF')
   assert.equal(await page.locator('#_editor-save').isDisabled(), true)
+  const writerEvents = await page.evaluate(() => window.__writerEvents)
+  assert.deepEqual(writerEvents.filter((event) => event.type === 'request').map((event) => event.prepare), [true, false])
+  assert.deepEqual(writerEvents.filter((event) => event.type === 'response').map((event) => event.detail.status), ['ready', 'written'])
 
   const second = `${first}\n第二次保存不选择路径。\n`
   await textarea.fill(second)
