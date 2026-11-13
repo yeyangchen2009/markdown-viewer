@@ -1,0 +1,11 @@
+{
+  "name": "markdown-viewer-editor-fork",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:e2e": "node --test --test-concurrency=1 test/extension.e2e.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.0"
+  }
+}

@@ -24,6 +24,7 @@
 - Configurable Markdown file path detection
 - Settings synchronization
 - Raw and rendered markdown views
+- Local Markdown editing with conflict-safe write-back ([使用与构建说明](docs/local-editor.md))
 - Free and Open Source
 
 # Table of Contents

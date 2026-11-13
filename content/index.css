@@ -359,3 +359,133 @@ img.emojione {
   /* prevent img stretch */
   width: auto;
 }
+
+/*---------------------------------------------------------------------------*/
+/*source editor*/
+
+body {
+  --editor-background: #ffffff;
+  --editor-foreground: #24292f;
+  --editor-muted: #57606a;
+  --editor-border: #d0d7de;
+  --editor-button: #f6f8fa;
+}
+body._color-dark {
+  --editor-background: #0d1117;
+  --editor-foreground: #e6edf3;
+  --editor-muted: #8b949e;
+  --editor-border: #30363d;
+  --editor-button: #21262d;
+}
+body._editing {
+  display: block;
+  min-height: 100vh;
+  padding: 0 !important;
+  background: var(--editor-background) !important;
+}
+body._editing #_toc {
+  display: none;
+}
+#_editor-input {
+  display: block;
+  box-sizing: border-box;
+  min-height: 100vh;
+  margin: 0 auto !important;
+  padding: 24px 24px 140px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  resize: none;
+  overflow-wrap: normal;
+  white-space: pre;
+  tab-size: 4;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 15px;
+  line-height: 1.65;
+  background: var(--editor-background) !important;
+  color: var(--editor-foreground) !important;
+  caret-color: var(--editor-foreground);
+  box-shadow: none !important;
+}
+#_editor-input::selection {
+  background: #0969da55;
+}
+#_editor-controls {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10000;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  box-sizing: border-box;
+  max-width: calc(100vw - 40px);
+  padding: 10px;
+  border: 1px solid var(--editor-border);
+  border-radius: 8px;
+  background: var(--editor-background);
+  color: var(--editor-foreground);
+  box-shadow: 0 8px 24px #01040926;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+}
+#_editor-controls button {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--editor-border);
+  border-radius: 6px;
+  background: var(--editor-button);
+  color: var(--editor-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+#_editor-controls button:hover:not(:disabled) {
+  border-color: var(--editor-muted);
+}
+#_editor-controls button:focus-visible {
+  outline: 2px solid #1f6feb;
+  outline-offset: 2px;
+}
+#_editor-controls button:disabled {
+  cursor: default;
+  opacity: .55;
+}
+#_editor-force-save {
+  border-color: #bf3989 !important;
+}
+#_editor-status {
+  flex-basis: 100%;
+  max-width: min(560px, calc(100vw - 60px));
+  color: var(--editor-muted);
+  line-height: 1.45;
+  text-align: right;
+}
+#_editor-status:empty {
+  display: none;
+}
+@media (max-width: 576px) {
+  #_editor-input {
+    width: 100% !important;
+    padding: 16px 16px 160px !important;
+  }
+  #_editor-controls {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    max-width: none;
+  }
+  #_editor-status {
+    max-width: 100%;
+    text-align: left;
+  }
+}
+@media print {
+  #_editor-controls {
+    display: none !important;
+  }
+  #_editor-input {
+    min-height: 0;
+    padding: 0 !important;
+  }
+}
