@@ -58,6 +58,57 @@ describe('source format and render sequence', () => {
 })
 
 describe('editor state', () => {
+  it('prepares before reading on first entry even after an autoreload snapshot', async () => {
+    const calls = []
+    const editor = mdEditor.create({
+      initial: '', filename: 'document.md',
+      prepare: (request) => {
+        calls.push('prepare')
+        assert.equal(request.documentUrl, 'file:///F:/temp/document.md')
+        assert.equal(request.expectedName, 'document.md')
+        return Promise.resolve({status: 'ready'})
+      },
+      read: async () => {
+        calls.push('read')
+        return {text: '', bom: false, eol: '\n'}
+      },
+      canWrite: () => true,
+      write: async () => ({status: 'written'}),
+      preview: () => {}, replace: () => {}, confirm: () => true, onChange: () => {},
+    })
+    editor.observe({text: '', bom: false, eol: '\n'})
+    await editor.enter()
+    assert.deepEqual(calls, ['prepare', 'read'])
+    assert.equal(editor.state.active, true)
+    assert.equal(editor.state.status, '已选择当前文件；之后保存不再选路径')
+    editor.exit()
+    await editor.enter()
+    assert.deepEqual(calls, ['prepare', 'read'], '重新进入编辑器不重复准备或读盘')
+  })
+
+  it('keeps editing and allows save retry after prepare cancellation or failure', async () => {
+    for (const prepare of [
+      async () => ({status: 'cancelled'}),
+      async () => { throw new Error('permission denied') },
+    ]) {
+      let writes = 0
+      const editor = mdEditor.create({
+        initial: '', filename: 'document.md', prepare,
+        read: async () => ({text: '', bom: false, eol: '\n'}),
+        write: async () => { writes++; return {status: 'written'} },
+        canWrite: () => true,
+        preview: () => {}, replace: () => {}, confirm: () => true, onChange: () => {},
+      })
+      await editor.enter()
+      assert.equal(editor.state.active, true)
+      assert.match(editor.state.status, /可编辑和导出/)
+      editor.input('draft')
+      await editor.save()
+      assert.equal(writes, 1)
+      assert.equal(editor.state.dirty, false)
+    }
+  })
+
   it('saves exact source and clears dirty only after a successful write', async () => {
     const context = harness()
     await context.editor.enter()

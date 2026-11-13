@@ -27,7 +27,7 @@ var mdFileWriter = (() => {
   var canWrite = () => location.protocol === 'file:' &&
     document.documentElement.dataset.mdFileWriter === 'ready'
 
-  var save = (request) => new Promise((resolve, reject) => {
+  var send = (request, prepare) => new Promise((resolve, reject) => {
     if (location.protocol !== 'file:') {
       reject(new Error('只有本地 file:// 文档支持覆盖原文件'))
       return
@@ -42,20 +42,23 @@ var mdFileWriter = (() => {
       var detail = event.detail
       if (!detail || detail.requestId !== requestId) return
       document.removeEventListener(RESPONSE, response)
-      if (detail.status === 'written' || detail.status === 'cancelled') {
+      if (detail.status === 'written' || detail.status === 'ready' || detail.status === 'cancelled') {
         resolve({status: detail.status})
       }
       else {
-        reject(new Error(detail.error || '无法写入本地 Markdown 文件'))
+        reject(new Error(detail.error || (prepare ? '无法连接本地 Markdown 文件' : '无法写入本地 Markdown 文件')))
       }
     }
     document.addEventListener(RESPONSE, response)
     document.dispatchEvent(new CustomEvent(REQUEST, {
-      detail: Object.assign({}, request, {requestId}),
+      detail: Object.assign({}, request, {requestId, prepare}),
     }))
   })
 
-  return {REQUEST, RESPONSE, pickerOptions, canWrite, writeHandle, save}
+  var prepare = (request) => send(request, true)
+  var save = (request) => send(request, false)
+
+  return {REQUEST, RESPONSE, pickerOptions, canWrite, writeHandle, prepare, save}
 })()
 
 if (typeof module !== 'undefined' && module.exports) {

@@ -17,6 +17,7 @@ var mdEditor = (() => {
   var create = (options) => {
     var state = {
       active: false,
+      entered: false,
       initialized: false,
       busy: false,
       saving: false,
@@ -48,20 +49,41 @@ var mdEditor = (() => {
 
     var enter = async () => {
       if (state.active || state.busy) return
-      if (state.initialized) {
+      if (state.entered) {
         state.active = true
         notify()
         return
       }
       state.busy = true
+      var writable = options.canWrite ? options.canWrite() : location.protocol === 'file:'
+      var preparation
+      try {
+        preparation = writable && options.prepare
+          ? options.prepare({
+            documentUrl: location.href.replace(/#.*$/, ''),
+            expectedName: options.filename,
+          })
+          : Promise.resolve({status: writable ? 'ready' : 'unsupported'})
+      }
+      catch (err) {
+        preparation = Promise.resolve({status: 'failed', error: err.message || String(err)})
+      }
+      preparation = preparation.catch((err) => ({status: 'failed', error: err.message || String(err)}))
       state.status = '正在读取源文件…'
       notify()
       try {
-        apply(await options.read())
+        var snapshot = await options.read()
+        var prepared = await preparation
+        apply(snapshot)
         state.active = true
-        state.status = (options.canWrite ? options.canWrite() : location.protocol === 'file:')
-          ? '首次保存需选择当前文件；之后可直接保存'
-          : '当前文档只能导出副本，不能覆盖原文件'
+        state.entered = true
+        state.status = prepared.status === 'ready'
+          ? '已选择当前文件；之后保存不再选路径'
+          : (prepared.status === 'cancelled'
+            ? '未连接原文件；可编辑和导出，保存时可重新选择'
+            : (prepared.status === 'failed'
+              ? `原文件连接失败：${prepared.error}；可编辑和导出`
+              : '当前文档只能导出副本，不能覆盖原文件'))
       }
       catch (err) {
         state.status = `读取失败：${err.message || err}`

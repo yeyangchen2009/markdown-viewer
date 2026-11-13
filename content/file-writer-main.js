@@ -53,6 +53,25 @@
     }))
   }
 
+  var acquire = async (request) => {
+    var key = request.documentUrl
+    var entry = handles.get(key)
+    if (!entry) {
+      var restored = await restore(key).catch(() => null)
+      if (restored) entry = {handle: restored, verified: true}
+    }
+    if (!entry) {
+      var handle = (await window.showOpenFilePicker(mdFileWriter.pickerOptions()))[0]
+      if (!handle) throw new Error('没有选择文件')
+      entry = {handle, verified: false}
+    }
+    if (entry.handle.name !== request.expectedName) {
+      throw new Error(`请选择当前打开的 ${request.expectedName}`)
+    }
+    handles.set(key, entry)
+    return entry
+  }
+
   document.addEventListener(mdFileWriter.REQUEST, async (event) => {
     var request = event.detail
     if (!request || typeof request.requestId !== 'string') return
@@ -61,36 +80,35 @@
       if (location.protocol !== 'file:' || request.documentUrl !== location.href.replace(/#.*$/, '')) {
         throw new Error('写回请求与当前本地文档不匹配')
       }
-      if (typeof request.content !== 'string' ||
-          typeof request.expectedText !== 'string' ||
-          typeof request.expectedName !== 'string') {
+      if (typeof request.expectedName !== 'string' || (!request.prepare &&
+          (typeof request.content !== 'string' || typeof request.expectedText !== 'string'))) {
         throw new Error('写回请求格式无效')
       }
       if (navigator.userActivation && !navigator.userActivation.isActive) {
-        throw new Error('保存必须由点击或键盘操作触发')
+        throw new Error('文件操作必须由点击或键盘操作触发')
       }
       if (!window.showOpenFilePicker) {
         throw new Error('当前浏览器不支持本地文件写回')
       }
 
       var key = request.documentUrl
-      var handle = handles.get(key) || await restore(key).catch(() => null)
-      if (!handle) {
-        handle = (await window.showOpenFilePicker(mdFileWriter.pickerOptions()))[0]
-        if (!handle) throw new Error('没有选择文件')
-        if (await handle.getFile().then((file) => file.text()) !== request.expectedText) {
+      var entry = await acquire(request)
+      if (request.prepare) {
+        respond(request.requestId, 'ready')
+        return
+      }
+      if (!entry.verified) {
+        if (await entry.handle.getFile().then((file) => file.text()) !== request.expectedText) {
+          handles.delete(key)
           throw new Error('所选文件与当前磁盘内容不一致，请重新核对后再保存')
         }
-        await persist(key, handle).catch((err) => {
+        entry.verified = true
+        await persist(key, entry.handle).catch((err) => {
           console.warn('[Markdown Viewer] 文件句柄无法持久化：', err)
         })
       }
-      if (handle.name !== request.expectedName) {
-        throw new Error(`请选择当前打开的 ${request.expectedName}`)
-      }
 
-      handles.set(key, handle)
-      await mdFileWriter.writeHandle(handle, request.content)
+      await mdFileWriter.writeHandle(entry.handle, request.content)
       respond(request.requestId, 'written')
     }
     catch (err) {

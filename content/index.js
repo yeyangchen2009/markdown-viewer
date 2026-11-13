@@ -77,6 +77,7 @@ var editor = mdEditor.create({
   initial: $('pre') ? $('pre').innerText : '',
   filename: decodeURIComponent(location.pathname.split('/').pop() || 'markdown.md'),
   read: readSource,
+  prepare: mdFileWriter.prepare,
   write: mdFileWriter.save,
   canWrite: mdFileWriter.canWrite,
   preview: (md) => render(md),
