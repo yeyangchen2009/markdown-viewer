@@ -14,6 +14,33 @@ var mdEditor = (() => {
     }
   }
 
+  var sourceOffset = (source, anchor, progress) => {
+    source = normalize(source || '')
+    progress = Math.min(1, Math.max(0, Number.isFinite(progress) ? progress : 0))
+    var expected = source.length * progress
+    var text = (anchor || '').trim()
+    var line = text.split('\n').find((value) => value.trim()) || ''
+    var candidates = [text, line.trim()]
+    if (line.length > 80) candidates.push(line.trim().slice(0, 80))
+    var offset = -1
+
+    candidates.filter((value, index, values) => value && values.indexOf(value) === index)
+      .forEach((candidate) => {
+        var from = 0
+        var match
+        while ((match = source.indexOf(candidate, from)) !== -1) {
+          if (offset === -1 || Math.abs(match - expected) < Math.abs(offset - expected)) {
+            offset = match
+          }
+          from = match + candidate.length
+        }
+      })
+
+    if (offset === -1) offset = Math.round(expected)
+    if (offset <= 0) return 0
+    return source.lastIndexOf('\n', offset - 1) + 1
+  }
+
   var create = (options) => {
     var state = {
       active: false,
@@ -242,7 +269,7 @@ var mdEditor = (() => {
     }
   }
 
-  return {create, latest, normalize, serialize}
+  return {create, latest, normalize, serialize, sourceOffset}
 })()
 
 if (typeof module !== 'undefined' && module.exports) {

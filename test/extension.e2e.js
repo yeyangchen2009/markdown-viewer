@@ -30,6 +30,42 @@ const waitStatus = async (page, text) => {
   }
 }
 
+const assertEditorLocation = async (page, textarea, source, anchor) => {
+  await page.waitForFunction((expected) => {
+    const element = document.querySelector('#_editor-input')
+    return element && element.value.slice(element.selectionStart).startsWith(expected)
+  }, anchor)
+  const position = await textarea.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      offset: element.selectionStart,
+      selectionEnd: element.selectionEnd,
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+      lineHeight: parseFloat(style.lineHeight),
+      paddingTop: parseFloat(style.paddingTop),
+    }
+  })
+  assert.equal(position.selectionEnd, position.offset, '进入编辑不应选中整段文本')
+  assert.equal(source.slice(position.offset).startsWith(anchor), true, '光标应对应进入前的可见段落')
+  assert.ok(position.offset < source.length * 0.75, '中部阅读不能跳到源码末尾')
+  const line = source.slice(0, position.offset).split('\n').length - 1
+  const caretTop = position.paddingTop + line * position.lineHeight - position.scrollTop
+  assert.ok(caretTop >= 0 && caretTop <= position.clientHeight, '目标源码行应位于 textarea 可视区域')
+  assert.ok(position.scrollTop < position.scrollHeight - position.clientHeight, '编辑视口不应停在滚动末尾')
+}
+
+const scrollToParagraph = async (page, anchor) => {
+  await page.evaluate((expected) => {
+    const paragraph = Array.from(document.querySelectorAll('#_html > p'))
+      .find((element) => element.textContent.trim() === expected)
+    if (!paragraph) throw new Error(`找不到测试段落：${expected}`)
+    paragraph.scrollIntoView({block: 'start'})
+  }, anchor)
+  await page.waitForTimeout(150)
+}
+
 const extensionId = async (context) => {
   const deadline = Date.now() + 30000
   while (Date.now() < deadline) {
@@ -319,7 +355,8 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   assert.equal(await page.locator('#_toc').count(), 1)
   assert.equal(await page.evaluate(() => document.documentElement.dataset.mdFileWriter), 'ready')
 
-  await page.evaluate(() => window.scrollTo(0, 600))
+  const firstReadingAnchor = '第 25 段，用于滚动位置连续性。'
+  await scrollToParagraph(page, firstReadingAnchor)
   await page.evaluate(() => {
     window.__writerEvents = []
     document.addEventListener('md:source-file-save-request', (event) => {
@@ -368,6 +405,7 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   assert.equal(await page.locator('#_toc').count(), 0)
   assert.equal(await page.locator('body').evaluate((element) => element.classList.contains('_color-dark')), true)
   assert.equal(await textarea.evaluate((element) => getComputedStyle(element).backgroundColor), 'rgb(13, 17, 23)')
+  await assertEditorLocation(page, textarea, initial, firstReadingAnchor)
 
   await textarea.evaluate((element) => {
     window.__editorNode = element
@@ -408,11 +446,13 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
 
   await page.reload()
   await page.waitForSelector('#_html h1')
-  const readingScroll = 900
-  await page.evaluate((offset) => window.scrollTo(0, offset), readingScroll)
+  const secondReadingAnchor = '第 45 段，用于滚动位置连续性。'
+  await scrollToParagraph(page, secondReadingAnchor)
+  const readingScroll = await page.evaluate(() => window.scrollY)
   await page.waitForSelector('#_editor-toggle')
   await page.locator('#_editor-toggle').click()
   await page.locator('#_editor-input').waitFor()
+  await assertEditorLocation(page, page.locator('#_editor-input'), second, secondReadingAnchor)
   const third = `${second}\n刷新后复用句柄。\n`
   await page.locator('#_editor-input').fill(third)
   await page.keyboard.press('Control+s')

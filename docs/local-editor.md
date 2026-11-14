@@ -3,14 +3,14 @@
 ## 使用
 
 1. 在扩展详情页开启「允许访问文件 URL」；新版 Edge 还需开启站点访问中的 `file:///*`。
-2. 打开本地 Markdown，点击右下角「编辑」。首次编辑时，在系统对话框中选择**当前打开的同名文件**。浏览器必须取得一次明确授权，扩展不能从 `file://` 地址静默推导写权限。
+2. 打开本地 Markdown，点击右下角「编辑」。首次编辑时，在系统对话框中选择**当前打开的同名文件**。浏览器必须取得一次明确授权，扩展不能从 `file://` 地址静默推导写权限，也不能把当前路径预填为已选文件。固定的选择框 `id` 可帮助浏览器记住上次目录；只有成功复用文件句柄时才会省去选择框。
 3. 选择成功后即可修改源码，按 **Ctrl/Cmd+S** 或点击「保存」直接写回，不再选择路径。第一次实际写入时 Edge 还会显示一次「保存更改」权限提示，这是写入授权，不是「另存为」。
 4. 如果进入编辑时取消选择或连接失败，仍可编辑和「导出副本」；之后点击「保存」可以重新选择当前文件。
 5. 同一页面后续保存复用句柄。刷新后优先从 IndexedDB 恢复句柄，点击「编辑」不再选择路径；浏览器不支持恢复时会重新要求选择，这是正常降级。
 
 实现参照 VS Code 当前源码的两段路径：[`fileDialogService.ts`](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/services/dialogs/browser/fileDialogService.ts) 通过 `showOpenFilePicker()` 取得文件句柄，[`htmlFileSystemProvider.ts`](https://github.com/microsoft/vscode/blob/main/src/vs/platform/files/browser/htmlFileSystemProvider.ts) 用内存 Map 与 IndexedDB 复用句柄，并在 `writeFile()` 中直接 `createWritable()`。本扩展同样由 `createWritable()` 让浏览器强制执行写权限，不自行绕过授权。
 
-「退出编辑」保留内存草稿并显示最新预览。未保存时关闭或刷新页面会触发浏览器提示；「导出副本」始终只表示导出，不会显示为已保存原文件。
+进入编辑时，扩展优先把预览视口中可见的块文本匹配到源码，将光标和编辑视口移到对应行；复杂行内标记或渲染内容无法匹配时，按阅读进度近似定位。「退出编辑」保留内存草稿、显示最新预览，并恢复本次进入前的阅读位置。未保存时关闭或刷新页面会触发浏览器提示；「导出副本」始终只表示导出，不会显示为已保存原文件。
 
 ```mermaid
 %%{init: {'theme':'dark','themeVariables':{'background':'#0d1117','primaryColor':'#1f6feb','primaryTextColor':'#ffffff','primaryBorderColor':'#79c0ff','secondaryColor':'#21262d','tertiaryColor':'#30363d','lineColor':'#8b949e','textColor':'#e6edf3','clusterBkg':'#161b22','clusterBorder':'#58a6ff','edgeLabelBackground':'#21262d','fontSize':'15px'}}}%%
