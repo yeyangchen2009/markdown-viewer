@@ -98,19 +98,46 @@ document.addEventListener('keydown', (event) => {
   }
 })
 
+var captureReadingLocation = () => {
+  var container = $('#_html')
+  var height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)
+  var progress = window.scrollY / Math.max(1, height - window.innerHeight)
+  var anchor = ''
+  if (container) {
+    var visible = Array.from(container.children).find((element) => {
+      var rect = element.getBoundingClientRect()
+      return rect.bottom > 0 && rect.top < window.innerHeight
+    })
+    if (visible) anchor = visible.textContent.trim()
+  }
+  return {scrollY: window.scrollY, progress, anchor}
+}
+
+var focusEditor = (reading) => {
+  var textarea = $('#_editor-input')
+  if (!textarea) return
+  var offset = mdEditor.sourceOffset(editor.state.draft, reading.anchor, reading.progress)
+  var line = editor.state.draft.slice(0, offset).split('\n').length - 1
+  var style = getComputedStyle(textarea)
+  var lineHeight = parseFloat(style.lineHeight) || 20
+  var paddingTop = parseFloat(style.paddingTop) || 0
+  textarea.focus({preventScroll: true})
+  textarea.setSelectionRange(offset, offset)
+  textarea.scrollLeft = 0
+  textarea.scrollTop = Math.max(0, paddingTop + line * lineHeight - textarea.clientHeight / 3)
+}
+
 var toggleEditor = async () => {
   if (editor.state.active) {
     state.preserveScroll = state.editorScroll
     editor.exit()
     return
   }
-  state.editorScroll = window.scrollY
+  var reading = captureReadingLocation()
+  state.editorScroll = reading.scrollY
   await editor.enter()
   if (editor.state.active) {
-    requestAnimationFrame(() => {
-      var textarea = $('#_editor-input')
-      if (textarea) textarea.focus()
-    })
+    requestAnimationFrame(() => focusEditor(reading))
   }
 }
 

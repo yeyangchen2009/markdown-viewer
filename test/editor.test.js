@@ -57,6 +57,34 @@ describe('source format and render sequence', () => {
   })
 })
 
+describe('reading position mapping', () => {
+  it('locates a visible paragraph and aligns headings to the source line', () => {
+    const source = '# 标题\n\n第一段。\n\n第二段。\n'
+    assert.equal(mdEditor.sourceOffset(source, '第二段。', 0.9), source.indexOf('第二段。'))
+    assert.equal(mdEditor.sourceOffset(source, '标题', 0), 0)
+  })
+
+  it('uses reading progress to disambiguate repeated source text', () => {
+    const source = `重复段落\n${'中'.repeat(100)}\n重复段落\n`
+    const expected = source.lastIndexOf('重复段落')
+    assert.equal(mdEditor.sourceOffset(source, '重复段落', 0.95), expected)
+  })
+
+  it('matches a useful visible prefix before falling back to progress', () => {
+    const prefix = '这是一段很长的可见文本，用来确认行内标记之前的前缀仍然可以定位。'
+    const source = `${prefix}${'后续文字'.repeat(20)}**加粗内容**\n下一段\n`
+    assert.equal(mdEditor.sourceOffset(source, `${prefix}${'后续文字'.repeat(20)}加粗内容`, 0.9), 0)
+  })
+
+  it('falls back to a line near reading progress and clamps the document end', () => {
+    const source = '第一行\n第二行\n第三行\n第四行\n'
+    const offset = mdEditor.sourceOffset(source, '无法匹配的渲染文本', 0.5)
+    assert.equal(source.slice(0, offset).endsWith('\n'), true)
+    assert.equal(mdEditor.sourceOffset(source, '', 1), source.length)
+    assert.equal(mdEditor.sourceOffset(source, '', 2), source.length)
+  })
+})
+
 describe('editor state', () => {
   it('prepares before reading on first entry even after an autoreload snapshot', async () => {
     const calls = []
