@@ -77,8 +77,8 @@ var readSource = () => new Promise((resolve, reject) => {
 
 var hybrid = null
 var controlsTimer = null
-var controlsPinned = () => editor.state.busy || editor.state.saving || editor.state.external ||
-  /失败|错误/.test(editor.state.status)
+var statusTimer = null
+var controlsPinned = () => editor.state.busy || editor.state.saving || editor.state.external
 var revealControls = () => {
   clearTimeout(controlsTimer)
   state.controlsVisible = true
@@ -95,6 +95,23 @@ var scheduleControls = () => {
   }, 1800)
 }
 
+var scheduleStatus = () => {
+  clearTimeout(statusTimer)
+  if (controlsPinned() || !editor.state.status) return
+  statusTimer = setTimeout(() => {
+    if (controlsPinned()) return
+    editor.state.status = ''
+    m.redraw()
+  }, 5000)
+}
+
+var editorChanged = () => {
+  revealControls()
+  scheduleControls()
+  scheduleStatus()
+  m.redraw()
+}
+
 var editor = mdEditor.create({
   initial: $('pre') ? $('pre').innerText : '',
   filename: decodeURIComponent(location.pathname.split('/').pop() || 'markdown.md'),
@@ -107,10 +124,7 @@ var editor = mdEditor.create({
     if (hybrid) hybrid.setContent(md)
   },
   confirm: (message) => window.confirm(message),
-  onChange: () => {
-    if (controlsPinned()) revealControls()
-    m.redraw()
-  },
+  onChange: editorChanged,
 })
 
 window.addEventListener('beforeunload', editor.beforeUnload)
@@ -173,7 +187,6 @@ var icon = (name) => {
     pen: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z'],
     toc: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
     save: ['M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z', 'M17 21v-8H7v8', 'M7 3v5h8'],
-    export: ['M12 3v12', 'm7 10 5 5 5-5', 'M5 21h14'],
   }
   return m('svg', {
     viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
@@ -236,6 +249,7 @@ var oncreate = {
         onInput: (content) => {
           var dirty = editor.state.dirty
           editor.input(content)
+          scheduleStatus()
           if (!dirty) m.redraw()
         },
       })
@@ -245,7 +259,7 @@ var oncreate = {
       console.error('[Markdown Viewer] Preview 编辑器初始化失败', err)
       editor.state.status = `Preview 编辑器初始化失败：${err.message || err}`
       hybrid = null
-      m.redraw()
+      editorChanged()
     }
   },
   controls: scheduleControls,
@@ -435,12 +449,6 @@ function mount () {
             disabled: editor.state.saving || (!editor.state.dirty && !editor.state.external),
             onclick: () => saveEditor(false),
           }, icon('save')),
-          editor.state.active && m('button#_editor-export._icon-button', {
-            type: 'button',
-            title: '导出 Markdown 副本',
-            'aria-label': '导出 Markdown 副本',
-            onclick: editor.exportCopy,
-          }, icon('export')),
           editor.state.active && editor.state.external && m('button#_editor-load-external', {
             type: 'button',
             onclick: editor.loadExternal,

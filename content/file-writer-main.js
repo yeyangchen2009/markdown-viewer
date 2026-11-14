@@ -61,6 +61,7 @@
       if (restored) entry = {handle: restored, verified: true}
     }
     if (!entry) {
+      mdFileWriter.requireActivation('选择文件')
       var handle = (await window.showOpenFilePicker(mdFileWriter.pickerOptions()))[0]
       if (!handle) throw new Error('没有选择文件')
       entry = {handle, verified: false}
@@ -84,9 +85,6 @@
           (typeof request.content !== 'string' || typeof request.expectedText !== 'string'))) {
         throw new Error('写回请求格式无效')
       }
-      if (navigator.userActivation && !navigator.userActivation.isActive) {
-        throw new Error('文件操作必须由点击或键盘操作触发')
-      }
       if (!window.showOpenFilePicker) {
         throw new Error('当前浏览器不支持本地文件写回')
       }
@@ -94,6 +92,7 @@
       var key = request.documentUrl
       var entry = await acquire(request)
       if (request.prepare) {
+        await mdFileWriter.ensureWritable(entry.handle)
         respond(request.requestId, 'ready')
         return
       }
