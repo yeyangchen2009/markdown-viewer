@@ -109,6 +109,7 @@ var scroll = (() => {
   var restoreToc = () => {
     var container = $('#_toc')
     if (!container || !state.tocVisible) return
+    container.style.visibility = state.raw && !editor.state.active ? 'hidden' : 'visible'
     setTimeout(() => {
       if (!tocListening) {
         tocListening = true

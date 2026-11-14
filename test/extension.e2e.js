@@ -355,7 +355,7 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   await popup.evaluate(async (content) => {
     await chrome.runtime.sendMessage({message: 'popup.content', content})
     await chrome.runtime.sendMessage({message: 'popup.theme', theme: 'github-dark'})
-  }, {...popupState.content, autoreload: true, toc: true, mermaid: true})
+  }, {...popupState.content, autoreload: true, toc: false, mermaid: true})
   await popup.close()
 
   const bridge = await context.newPage()
@@ -376,7 +376,7 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
     throw error
   })
   assert.equal(await page.locator('#_html h1').textContent(), '初始标题')
-  assert.equal(await page.locator('#_toc').count(), 1)
+  assert.equal(await page.locator('#_toc').count(), 0, '全局默认关闭时，初始页面不应显示 TOC')
   assert.equal(await page.evaluate(() => document.documentElement.dataset.mdFileWriter), 'ready')
   assert.equal(await page.locator('#_editor-toggle svg').count(), 1)
   assert.equal(await page.locator('#_toc-toggle svg').count(), 1)
@@ -390,14 +390,20 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   assert.equal(await page.locator('#_editor-controls').evaluate((element) => getComputedStyle(element).opacity), '1')
   await page.evaluate(() => { window.__tocNavigationSentinel = 'not-reloaded' })
   await page.locator('#_toc-toggle').click()
+  await page.locator('#_toc a').first().waitFor({state: 'visible'})
+  assert.equal(await page.locator('#_toc a').first().textContent(), '初始标题')
+  assert.equal(await page.locator('#_toc').evaluate((element) => getComputedStyle(element).visibility), 'visible')
+  assert.equal(await page.evaluate(() => window.__tocNavigationSentinel), 'not-reloaded')
+  await page.locator('#_toc-toggle').click()
   assert.equal(await page.locator('#_toc').count(), 0)
   assert.equal(await page.evaluate(() => window.__tocNavigationSentinel), 'not-reloaded')
   await page.locator('#_toc-toggle').click()
-  assert.equal(await page.locator('#_toc').count(), 1)
+  await page.locator('#_toc a').first().waitFor({state: 'visible'})
+  assert.equal(await page.locator('#_toc').evaluate((element) => getComputedStyle(element).visibility), 'visible')
   assert.equal(await page.evaluate(() => window.__tocNavigationSentinel), 'not-reloaded')
   assert.equal(await bridge.evaluate(() => new Promise((resolve) => {
     chrome.storage.sync.get('content', (value) => resolve(value.content.toc))
-  })), true, '快捷 TOC 不应改写全局默认设置')
+  })), false, '快捷 TOC 不应改写全局默认设置')
 
   const firstReadingAnchor = '第 25 段，用于滚动位置连续性。'
   await scrollToParagraph(page, firstReadingAnchor)
