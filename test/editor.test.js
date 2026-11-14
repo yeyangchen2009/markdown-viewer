@@ -83,6 +83,16 @@ describe('reading position mapping', () => {
     assert.equal(mdEditor.sourceOffset(source, '', 1), source.length)
     assert.equal(mdEditor.sourceOffset(source, '', 2), source.length)
   })
+
+  it('maps zero-based source lines without losing CRLF boundaries', () => {
+    const source = '# 标题\r\n\r\n第二段\r\n末尾'
+    assert.equal(mdEditor.sourceLineOffset(source, 0), 0)
+    assert.equal(mdEditor.sourceLineOffset(source, 2), source.indexOf('第二段'))
+    assert.equal(mdEditor.sourceLineOffset(source, 3), source.indexOf('末尾'))
+    assert.equal(mdEditor.sourceLineOffset(source, 99), source.length)
+    assert.equal(mdEditor.sourceLineOffset(source, -2), 0)
+    assert.equal(mdEditor.sourceLineOffset(source, Number.NaN), 0)
+  })
 })
 
 describe('editor state', () => {

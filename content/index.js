@@ -12,8 +12,10 @@ var state = {
   html: '',
   markdown: '',
   toc: '',
+  tocVisible: args.content.toc,
   preserveScroll: null,
   editorScroll: 0,
+  controlsVisible: true,
   reload: {
     interval: null,
     ms: 1000,
@@ -73,6 +75,26 @@ var readSource = () => new Promise((resolve, reject) => {
   })
 })
 
+var hybrid = null
+var controlsTimer = null
+var controlsPinned = () => editor.state.busy || editor.state.saving || editor.state.external ||
+  /失败|错误/.test(editor.state.status)
+var revealControls = () => {
+  clearTimeout(controlsTimer)
+  state.controlsVisible = true
+}
+var scheduleControls = () => {
+  clearTimeout(controlsTimer)
+  if (controlsPinned()) {
+    state.controlsVisible = true
+    return
+  }
+  controlsTimer = setTimeout(() => {
+    state.controlsVisible = false
+    m.redraw()
+  }, 1800)
+}
+
 var editor = mdEditor.create({
   initial: $('pre') ? $('pre').innerText : '',
   filename: decodeURIComponent(location.pathname.split('/').pop() || 'markdown.md'),
@@ -82,11 +104,13 @@ var editor = mdEditor.create({
   canWrite: mdFileWriter.canWrite,
   preview: (md) => render(md),
   replace: (md) => {
-    var textarea = $('#_editor-input')
-    if (textarea) textarea.value = md
+    if (hybrid) hybrid.setContent(md)
   },
   confirm: (message) => window.confirm(message),
-  onChange: () => m.redraw(),
+  onChange: () => {
+    if (controlsPinned()) revealControls()
+    m.redraw()
+  },
 })
 
 window.addEventListener('beforeunload', editor.beforeUnload)
@@ -114,29 +138,27 @@ var captureReadingLocation = () => {
 }
 
 var focusEditor = (reading) => {
-  var textarea = $('#_editor-input')
-  if (!textarea) return
+  if (!hybrid) return
   var offset = mdEditor.sourceOffset(editor.state.draft, reading.anchor, reading.progress)
   var line = editor.state.draft.slice(0, offset).split('\n').length - 1
-  var style = getComputedStyle(textarea)
-  var lineHeight = parseFloat(style.lineHeight) || 20
-  var paddingTop = parseFloat(style.paddingTop) || 0
-  textarea.focus({preventScroll: true})
-  textarea.setSelectionRange(offset, offset)
-  textarea.scrollLeft = 0
-  textarea.scrollTop = Math.max(0, paddingTop + line * lineHeight - textarea.clientHeight / 3)
+  hybrid.focus()
+  hybrid.revealSourceLine(line)
 }
 
 var toggleEditor = async () => {
   if (editor.state.active) {
     state.preserveScroll = state.editorScroll
+    if (hybrid) hybrid.setActive(false)
     editor.exit()
     return
   }
+  if (!hybrid) return
   var reading = captureReadingLocation()
   state.editorScroll = reading.scrollY
   await editor.enter()
   if (editor.state.active) {
+    hybrid.setContent(editor.state.draft)
+    hybrid.setActive(true)
     requestAnimationFrame(() => focusEditor(reading))
   }
 }
@@ -144,6 +166,28 @@ var toggleEditor = async () => {
 var saveEditor = (force) => {
   if (force && !window.confirm('磁盘文件已被外部修改。仍要用当前草稿覆盖它吗？')) return
   editor.save(force)
+}
+
+var icon = (name) => {
+  var paths = {
+    pen: ['M12 20h9', 'M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z'],
+    toc: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+    save: ['M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z', 'M17 21v-8H7v8', 'M7 3v5h8'],
+    export: ['M12 3v12', 'm7 10 5 5 5-5', 'M5 21h14'],
+  }
+  return m('svg', {
+    viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+    'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    'aria-hidden': 'true',
+  }, paths[name].map((d) => m('path', {d})))
+}
+
+var toggleToc = () => {
+  if (!state.toc) return
+  state.tocVisible = !state.tocVisible
+  setTimeout(() => {
+    if (state.tocVisible) scroll.toc()
+  }, 0)
 }
 
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
@@ -172,9 +216,39 @@ var oncreate = {
   html: () => {
     update()
   },
-  editor: (vnode) => {
-    vnode.dom.value = editor.state.draft
+  hybrid: (vnode) => {
+    try {
+      hybrid = mdHybrid.create({
+        content: editor.state.draft,
+        customCodeLanguages: state.content.mermaid ? ['mermaid', 'mmd'] : [],
+        renderCodeBlock: (language, content, placeholder) => {
+          placeholder.classList.add('mermaid')
+          placeholder.textContent = content
+          var theme = $('body').classList.contains('_color-dark') ? 'dark' : 'default'
+          try {
+            mermaid.initialize({theme})
+            mermaid.init({theme}, placeholder)
+          }
+          catch (err) {
+            placeholder.textContent = `${language}: ${err.message || err}`
+          }
+        },
+        onInput: (content) => {
+          var dirty = editor.state.dirty
+          editor.input(content)
+          if (!dirty) m.redraw()
+        },
+      })
+      vnode.dom.appendChild(hybrid.element)
+    }
+    catch (err) {
+      console.error('[Markdown Viewer] Preview 编辑器初始化失败', err)
+      editor.state.status = `Preview 编辑器初始化失败：${err.message || err}`
+      hybrid = null
+      m.redraw()
+    }
   },
+  controls: scheduleControls,
 }
 
 var onupdate = {
@@ -240,9 +314,7 @@ var render = (md) => {
         '<code class="mermaid">'
       )
     }
-    if (state.content.toc) {
-      state.toc = toc.render(state.html)
-    }
+    state.toc = toc.render(state.html)
     state.html = anchors(state.html)
     m.redraw()
     if (!editor.state.active && state.preserveScroll !== null) {
@@ -291,22 +363,14 @@ function mount () {
           (/github(-dark)?/.test(state.theme) ? 'markdown-body' : 'markdown-theme') +
           (state.themes.width !== 'auto' ? ` _width-${state.themes.width}` : '')
 
-        if (editor.state.active) {
-          dom.push(m('textarea#_editor-input', {
-            key: 'markdown-source-editor',
-            class: theme,
-            spellcheck: false,
-            'aria-label': 'Markdown 源码',
-            oncreate: oncreate.editor,
-            oninput: (event) => {
-              var dirty = editor.state.dirty
-              event.redraw = false
-              editor.input(event.target.value)
-              if (!dirty) m.redraw()
-            },
-          }))
-        }
-        else if (state.raw) {
+        dom.push(m('#_hybrid-editor-host', {
+          class: theme,
+          style: {display: editor.state.active ? 'block' : 'none'},
+          'aria-hidden': editor.state.active ? 'false' : 'true',
+          oncreate: oncreate.hybrid,
+        }))
+
+        if (state.raw && !editor.state.active) {
           if (state.content.syntax) {
             dom.push(m('#_markdown', {oncreate: oncreate.html, onupdate: onupdate.html, class: theme},
               m.trust(`<pre class="language-md"><code class="language-md">${_escape(state.markdown)}</code></pre>`)
@@ -317,14 +381,19 @@ function mount () {
           }
         }
         else {
-          dom.push(m('#_html', {oncreate: oncreate.html, onupdate: onupdate.html, class: theme},
-            m.trust(state.html)
-          ))
+          dom.push(m('#_html', {
+            oncreate: oncreate.html,
+            onupdate: onupdate.html,
+            class: theme,
+            style: {display: editor.state.active ? 'none' : 'block'},
+          }, m.trust(state.html)))
         }
 
-        if (state.content.toc && !editor.state.active) {
+        if (state.tocVisible) {
           dom.push(m('#_toc.tex2jax-ignore', m.trust(state.toc)))
-          state.raw ? $('body').classList.remove('_toc-left') : $('body').classList.add('_toc-left')
+          state.raw && !editor.state.active
+            ? $('body').classList.remove('_toc-left')
+            : $('body').classList.add('_toc-left')
         }
         else {
           $('body').classList.remove('_toc-left')
@@ -334,22 +403,44 @@ function mount () {
           dom.push(m('style', {type: 'text/css'}, state.custom.theme))
         }
 
-        dom.push(m('#_editor-controls', [
-          m('button#_editor-toggle', {
+        dom.push(m('#_editor-controls', {
+          class: (state.controlsVisible || controlsPinned() ? '_visible ' : '') +
+            (controlsPinned() ? '_pinned' : ''),
+          oncreate: oncreate.controls,
+          onpointerenter: revealControls,
+          onpointerleave: scheduleControls,
+          onfocusin: revealControls,
+          onfocusout: scheduleControls,
+        }, [
+          m('button#_toc-toggle._icon-button', {
             type: 'button',
-            disabled: editor.state.busy,
+            title: state.tocVisible ? '隐藏目录' : '显示目录',
+            'aria-label': state.tocVisible ? '隐藏目录' : '显示目录',
+            'aria-pressed': state.tocVisible ? 'true' : 'false',
+            disabled: !state.toc,
+            onclick: toggleToc,
+          }, icon('toc')),
+          m('button#_editor-toggle._icon-button', {
+            type: 'button',
+            title: editor.state.busy ? '正在读取源文件' : (editor.state.active ? '退出编辑' : '编辑 Preview'),
+            'aria-label': editor.state.busy ? '正在读取源文件' : (editor.state.active ? '退出编辑' : '编辑 Preview'),
+            'aria-pressed': editor.state.active ? 'true' : 'false',
+            disabled: editor.state.busy || !hybrid,
             onclick: toggleEditor,
-          }, editor.state.busy ? '读取中…' : (editor.state.active ? '退出编辑' : '编辑')),
-          editor.state.active && mdFileWriter.canWrite() && m('button#_editor-save', {
+          }, icon('pen')),
+          editor.state.active && mdFileWriter.canWrite() && m('button#_editor-save._icon-button', {
             type: 'button',
-            title: 'Ctrl/Cmd+S',
+            title: editor.state.saving ? '保存中' : '保存原文件（Ctrl/Cmd+S）',
+            'aria-label': editor.state.saving ? '保存中' : '保存原文件',
             disabled: editor.state.saving || (!editor.state.dirty && !editor.state.external),
             onclick: () => saveEditor(false),
-          }, editor.state.saving ? '保存中…' : '保存'),
-          editor.state.active && m('button#_editor-export', {
+          }, icon('save')),
+          editor.state.active && m('button#_editor-export._icon-button', {
             type: 'button',
+            title: '导出 Markdown 副本',
+            'aria-label': '导出 Markdown 副本',
             onclick: editor.exportCopy,
-          }, '导出副本'),
+          }, icon('export')),
           editor.state.active && editor.state.external && m('button#_editor-load-external', {
             type: 'button',
             onclick: editor.loadExternal,

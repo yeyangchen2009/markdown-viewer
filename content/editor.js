@@ -41,6 +41,17 @@ var mdEditor = (() => {
     return source.lastIndexOf('\n', offset - 1) + 1
   }
 
+  var sourceLineOffset = (source, line) => {
+    source = source || ''
+    line = Math.max(0, Math.floor(Number.isFinite(line) ? line : 0))
+    if (!line) return 0
+    var current = 0
+    for (var match of source.matchAll(/\r\n|\n|\r/g)) {
+      if (++current === line) return match.index + match[0].length
+    }
+    return source.length
+  }
+
   var create = (options) => {
     var state = {
       active: false,
@@ -269,7 +280,7 @@ var mdEditor = (() => {
     }
   }
 
-  return {create, latest, normalize, serialize, sourceOffset}
+  return {create, latest, normalize, serialize, sourceLineOffset, sourceOffset}
 })()
 
 if (typeof module !== 'undefined' && module.exports) {

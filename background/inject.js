@@ -22,6 +22,7 @@ md.inject = ({storage: {state}}) => (id) => {
   chrome.scripting.insertCSS({
     target: {tabId: id},
     files: [
+      '/content/hybrid/editor.css',
       '/content/index.css',
       '/content/themes.css',
     ]
@@ -47,6 +48,8 @@ md.inject = ({storage: {state}}) => (id) => {
       state.content.emoji && '/content/emoji.js',
       state.content.mermaid && ['/vendor/mermaid.min.js', '/vendor/panzoom.min.js', '/content/mermaid.js'],
       state.content.mathjax && ['/content/mathjax.js', '/vendor/mathjax/tex-mml-chtml.js'],
+      '/content/hybrid/editor.js',
+      '/content/hybrid-editor.js',
       '/content/file-writer.js',
       '/content/editor.js',
       '/content/index.js',

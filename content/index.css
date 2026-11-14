@@ -377,38 +377,52 @@ body._color-dark {
   --editor-border: #30363d;
   --editor-button: #21262d;
 }
-body._editing {
-  display: block;
-  min-height: 100vh;
-  padding: 0 !important;
-  background: var(--editor-background) !important;
-}
-body._editing #_toc {
-  display: none;
-}
-#_editor-input {
-  display: block;
+#_hybrid-editor-host {
   box-sizing: border-box;
   min-height: 100vh;
-  margin: 0 auto !important;
-  padding: 24px 24px 140px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  outline: none !important;
-  resize: none;
-  overflow-wrap: normal;
-  white-space: pre;
-  tab-size: 4;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 15px;
-  line-height: 1.65;
-  background: var(--editor-background) !important;
-  color: var(--editor-foreground) !important;
-  caret-color: var(--editor-foreground);
-  box-shadow: none !important;
+  background: transparent !important;
+  color: var(--editor-foreground);
 }
-#_editor-input::selection {
+#_hybrid-editor-host .md-editor {
+  min-height: 100%;
+  background: transparent !important;
+  color: inherit;
+  font-family: inherit;
+  caret-color: transparent;
+}
+#_hybrid-editor-host .md-editor::selection,
+#_hybrid-editor-host .md-editor *::selection {
   background: #0969da55;
+}
+#_hybrid-editor-host ._hybrid-custom-code {
+  box-sizing: border-box;
+  margin: 0 0 16px;
+  overflow: auto;
+  text-align: center;
+}
+body._color-dark #_hybrid-editor-host .md-editor {
+  color-scheme: dark;
+  --md-cursor-background: #e6edf3;
+  --md-selection-background: #1f6feb66;
+  --md-block-active-background: #161b22;
+}
+body._color-dark #_hybrid-editor-host .md-heading,
+body._color-dark #_hybrid-editor-host .md-table-cell,
+body._color-dark #_hybrid-editor-host .md-table-row {
+  border-color: #30363d;
+}
+body._color-dark #_hybrid-editor-host .md-blockquote,
+body._color-dark #_hybrid-editor-host h6.md-heading {
+  color: #8b949e;
+  border-color: #30363d;
+}
+body._color-dark #_hybrid-editor-host .md-code-block,
+body._color-dark #_hybrid-editor-host :not(pre) > code {
+  background-color: #161b22;
+  color: #e6edf3;
+}
+body._color-dark #_hybrid-editor-host a {
+  color: #58a6ff;
 }
 #_editor-controls {
   position: fixed;
@@ -418,21 +432,32 @@ body._editing #_toc {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
   box-sizing: border-box;
   max-width: calc(100vw - 40px);
-  padding: 10px;
-  border: 1px solid var(--editor-border);
-  border-radius: 8px;
-  background: var(--editor-background);
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--editor-border) 70%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--editor-background) 92%, transparent);
   color: var(--editor-foreground);
-  box-shadow: 0 8px 24px #01040926;
+  box-shadow: 0 4px 16px #0104091f;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 13px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .16s ease, transform .16s ease;
+}
+#_editor-controls._visible,
+#_editor-controls._pinned,
+#_editor-controls:hover,
+#_editor-controls:focus-within {
+  opacity: 1;
+  transform: translateY(0);
 }
 #_editor-controls button {
-  min-height: 32px;
-  padding: 4px 12px;
+  min-height: 30px;
+  padding: 4px 10px;
   border: 1px solid var(--editor-border);
   border-radius: 6px;
   background: var(--editor-button);
@@ -440,8 +465,32 @@ body._editing #_toc {
   font: inherit;
   cursor: pointer;
 }
+#_editor-controls button._icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 6px;
+  border-color: transparent;
+  border-radius: 7px;
+  background: transparent;
+}
+#_editor-controls button._icon-button svg {
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+}
 #_editor-controls button:hover:not(:disabled) {
-  border-color: var(--editor-muted);
+  border-color: var(--editor-border);
+  background: var(--editor-button);
+}
+#_editor-controls button[aria-pressed="true"] {
+  color: #1f6feb;
+  background: var(--editor-button);
+}
+body._color-dark #_editor-controls button[aria-pressed="true"] {
+  color: #79c0ff;
 }
 #_editor-controls button:focus-visible {
   outline: 2px solid #1f6feb;
@@ -449,7 +498,7 @@ body._editing #_toc {
 }
 #_editor-controls button:disabled {
   cursor: default;
-  opacity: .55;
+  opacity: .4;
 }
 #_editor-force-save {
   border-color: #bf3989 !important;
@@ -457,6 +506,7 @@ body._editing #_toc {
 #_editor-status {
   flex-basis: 100%;
   max-width: min(560px, calc(100vw - 60px));
+  padding: 0 5px 3px;
   color: var(--editor-muted);
   line-height: 1.45;
   text-align: right;
@@ -464,16 +514,22 @@ body._editing #_toc {
 #_editor-status:empty {
   display: none;
 }
-@media (max-width: 576px) {
-  #_editor-input {
-    width: 100% !important;
-    padding: 16px 16px 160px !important;
+@media (hover: none) {
+  #_editor-controls {
+    opacity: 1;
+    transform: none;
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  #_editor-controls {
+    transition: none;
+  }
+}
+@media (max-width: 576px) {
   #_editor-controls {
     right: 10px;
     bottom: 10px;
-    left: 10px;
-    max-width: none;
+    max-width: calc(100vw - 20px);
   }
   #_editor-status {
     max-width: 100%;
@@ -484,8 +540,7 @@ body._editing #_toc {
   #_editor-controls {
     display: none !important;
   }
-  #_editor-input {
+  #_hybrid-editor-host {
     min-height: 0;
-    padding: 0 !important;
   }
 }
