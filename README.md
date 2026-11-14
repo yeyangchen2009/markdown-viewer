@@ -24,7 +24,6 @@
 - Configurable Markdown file path detection
 - Settings synchronization
 - Raw and rendered markdown views
-- Local Markdown editing with conflict-safe write-back ([使用与构建说明](docs/local-editor.md))
 - Free and Open Source
 
 # Table of Contents
@@ -185,6 +184,8 @@ Alternatively code blocks can be wrapped in HTML tags:
 ## ToC
 
 Generates Table of Contents (ToC) based on the headers found in the markdown document.
+
+The always-visible three-line button in the lower-right corner toggles the ToC for the current page without reloading or changing the default setting.
 
 ---
 

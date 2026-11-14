@@ -2,13 +2,9 @@ npm-debug.log
 coverage/
 node_modules/
 package-lock.json
-!/package-lock.json
 
 /themes/
 /vendor/
 /*.zip
 /manifest.json
 /background/index-compilers.js
-/build/tmp/
-/dist/
-/test-results/
