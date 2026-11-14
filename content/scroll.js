@@ -105,35 +105,44 @@ var scroll = (() => {
     })
   }
   var listening = false
-  return (update) => {
-    if ($('#_toc') && state.raw) $('#_toc').style.visibility = 'hidden'
+  var tocListening = false
+  var restoreToc = () => {
+    var container = $('#_toc')
+    if (!container || !state.tocVisible) return
+    setTimeout(() => {
+      if (!tocListening) {
+        tocListening = true
+        set(container, 'md-toc-')
+      }
+      get(container, 'md-toc-')
+    }, 10)
+  }
+  var update = (reload) => {
+    if ($('#_toc') && state.raw && !editor.state.active) $('#_toc').style.visibility = 'hidden'
     onload(() => {
       var container = ((html = $('html')) => (
         html.scrollTop = 1,
         html.scrollTop ? (html.scrollTop = 0, html) : $('body')
       ))()
 
-      if (!update && location.hash && document.getElementById(location.hash.slice(1))) {
+      if (!reload && location.hash && document.getElementById(location.hash.slice(1))) {
         get(container, 'md-', document.getElementById(location.hash.slice(1)).offsetTop)
       }
       else {
         get(container, 'md-')
       }
 
-      if (state.content.toc) {
-        setTimeout(() => get($('#_toc'), 'md-toc-'), 10)
-      }
+      if (state.tocVisible) restoreToc()
 
       if (!listening) {
         listening = true
         set(container, 'md-')
-        if (state.content.toc) {
-          setTimeout(() => set($('#_toc'), 'md-toc-'), 10)
-        }
       }
 
       if ($('#_html')) $('#_html').style.visibility = 'visible'
-      if ($('#_toc') && !state.raw) $('#_toc').style.visibility = 'visible'
+      if ($('#_toc') && (!state.raw || editor.state.active)) $('#_toc').style.visibility = 'visible'
     })
   }
+  update.toc = restoreToc
+  return update
 })()

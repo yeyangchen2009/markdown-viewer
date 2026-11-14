@@ -2,10 +2,15 @@
   "name": "markdown-viewer-editor-fork",
   "private": true,
   "scripts": {
+    "build:hybrid": "node build/build-hybrid.mjs",
     "test": "node --test test/*.test.js",
     "test:e2e": "node --test --test-concurrency=1 test/extension.e2e.js"
   },
   "devDependencies": {
+    "@vscode/markdown-editor": "0.0.2-179",
+    "@vscode/observables": "0.1.1-0",
+    "esbuild": "0.25.12",
+    "katex": "0.16.33",
     "playwright-core": "^1.65.0"
   }
 }
