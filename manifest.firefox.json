@@ -61,7 +61,6 @@
       ],
       "resources": [
         "/content/anchor.svg",
-        "/content/hybrid/*",
         "/icons/default/16x16.png",
         "/icons/dark/16x16.png",
         "/icons/light/16x16.png",

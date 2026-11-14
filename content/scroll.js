@@ -109,7 +109,7 @@ var scroll = (() => {
   var restoreToc = () => {
     var container = $('#_toc')
     if (!container || !state.tocVisible) return
-    container.style.visibility = state.raw && !editor.state.active ? 'hidden' : 'visible'
+    container.style.visibility = state.raw ? 'hidden' : 'visible'
     setTimeout(() => {
       if (!tocListening) {
         tocListening = true
@@ -119,7 +119,7 @@ var scroll = (() => {
     }, 10)
   }
   var update = (reload) => {
-    if ($('#_toc') && state.raw && !editor.state.active) $('#_toc').style.visibility = 'hidden'
+    if ($('#_toc') && state.raw) $('#_toc').style.visibility = 'hidden'
     onload(() => {
       var container = ((html = $('html')) => (
         html.scrollTop = 1,
@@ -141,7 +141,7 @@ var scroll = (() => {
       }
 
       if ($('#_html')) $('#_html').style.visibility = 'visible'
-      if ($('#_toc') && (!state.raw || editor.state.active)) $('#_toc').style.visibility = 'visible'
+      if ($('#_toc') && !state.raw) $('#_toc').style.visibility = 'visible'
     })
   }
   update.toc = restoreToc
