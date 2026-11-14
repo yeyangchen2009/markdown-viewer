@@ -8,6 +8,20 @@ beforeEach(() => {
   global.location = {protocol: 'file:', href: 'file:///F:/temp/document.md'}
 })
 
+const withUserActivation = async (isActive, callback) => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  Object.defineProperty(globalThis, 'navigator', {
+    value: {userActivation: {isActive}}, configurable: true, writable: true,
+  })
+  try {
+    await callback()
+  }
+  finally {
+    if (descriptor) Object.defineProperty(globalThis, 'navigator', descriptor)
+    else delete globalThis.navigator
+  }
+}
+
 const harness = (initial = '# Title\r\n\r\nText\r\n', bom = true) => {
   let disk = initial
   let format = {bom, eol: initial.includes('\r\n') ? '\r\n' : '\n'}
@@ -118,7 +132,7 @@ describe('editor state', () => {
     await editor.enter()
     assert.deepEqual(calls, ['prepare', 'read'])
     assert.equal(editor.state.active, true)
-    assert.equal(editor.state.status, '已选择当前文件；之后保存不再选路径')
+    assert.equal(editor.state.status, '已连接当前文件并确认写入权限；之后保存不再选路径')
     editor.exit()
     await editor.enter()
     assert.deepEqual(calls, ['prepare', 'read'], '重新进入编辑器不重复准备或读盘')
@@ -130,8 +144,13 @@ describe('editor state', () => {
       async () => { throw new Error('permission denied') },
     ]) {
       let writes = 0
+      let prepareAttempts = 0
       const editor = mdEditor.create({
-        initial: '', filename: 'document.md', prepare,
+        initial: '', filename: 'document.md',
+        prepare: async (...args) => {
+          prepareAttempts++
+          return prepareAttempts === 1 ? prepare(...args) : {status: 'ready'}
+        },
         read: async () => ({text: '', bom: false, eol: '\n'}),
         write: async () => { writes++; return {status: 'written'} },
         canWrite: () => true,
@@ -139,12 +158,50 @@ describe('editor state', () => {
       })
       await editor.enter()
       assert.equal(editor.state.active, true)
-      assert.match(editor.state.status, /可编辑和导出/)
+      assert.match(editor.state.status, /可在本页编辑/)
       editor.input('draft')
       await editor.save()
       assert.equal(writes, 1)
       assert.equal(editor.state.dirty, false)
     }
+  })
+
+  it('confirms write permission before every save-time disk read', async () => {
+    const calls = []
+    const editor = mdEditor.create({
+      initial: '', filename: 'document.md',
+      prepare: async () => { calls.push('prepare'); return {status: 'ready'} },
+      read: async () => { calls.push('read'); return {text: '', bom: false, eol: '\n'} },
+      write: async () => { calls.push('write'); return {status: 'written'} },
+      canWrite: () => true,
+      preview: () => {}, replace: () => {}, confirm: () => true, onChange: () => {},
+    })
+    await editor.enter()
+    calls.length = 0
+    editor.input('draft')
+    await editor.save()
+    assert.deepEqual(calls, ['prepare', 'read', 'write'])
+  })
+
+  it('stops before reading or writing when save-time preparation is cancelled', async () => {
+    let reads = 0
+    let writes = 0
+    const editor = mdEditor.create({
+      initial: '', filename: 'document.md',
+      prepare: async () => ({status: 'cancelled'}),
+      read: async () => { reads++; return {text: '', bom: false, eol: '\n'} },
+      write: async () => { writes++; return {status: 'written'} },
+      canWrite: () => true,
+      preview: () => {}, replace: () => {}, confirm: () => true, onChange: () => {},
+    })
+    await editor.enter()
+    editor.input('draft')
+    const result = await editor.save()
+    assert.equal(result.status, 'cancelled')
+    assert.equal(reads, 1, '只有进入编辑时读取磁盘快照')
+    assert.equal(writes, 0)
+    assert.equal(editor.state.dirty, true)
+    assert.match(editor.state.status, /草稿仍保留/)
   })
 
   it('saves exact source and clears dirty only after a successful write', async () => {
@@ -226,7 +283,7 @@ describe('editor state', () => {
     assert.equal(context.editor.state.draft, 'draft\n')
   })
 
-  it('does not attempt source writes when only export is available', async () => {
+  it('does not attempt source writes when write-back is unsupported', async () => {
     let reads = 0
     let writes = 0
     const editor = mdEditor.create({
@@ -256,6 +313,20 @@ describe('editor state', () => {
     await editor.save()
     assert.equal(editor.state.dirty, true)
     assert.match(editor.state.status, /已取消/)
+  })
+
+  it('keeps the draft and disk baseline after a write failure', async () => {
+    const context = harness()
+    await context.editor.enter()
+    context.editor.input('draft\n')
+    const baseline = context.disk
+    context.writeHook = async () => { throw new Error('NotAllowedError') }
+    const result = await context.editor.save()
+    assert.equal(result.status, 'failed')
+    assert.equal(context.disk, baseline)
+    assert.equal(context.editor.state.draft, 'draft\n')
+    assert.equal(context.editor.state.dirty, true)
+    assert.match(context.editor.state.status, /保存失败/)
   })
 
   it('warns before unloading a dirty or saving editor', async () => {
@@ -301,16 +372,57 @@ describe('file handle writes', () => {
     assert.equal(closed, false)
   })
 
-  it('delegates restored-handle permission to createWritable', async () => {
-    let created = false
+  it('uses an already granted handle without requesting permission or activation', async () => {
+    await withUserActivation(false, async () => {
+      let requests = 0
+      const handle = {
+        queryPermission: async (options) => {
+          assert.deepEqual(options, {mode: 'readwrite'})
+          return 'granted'
+        },
+        requestPermission: async () => { requests++; return 'granted' },
+      }
+      await mdFileWriter.ensureWritable(handle)
+      assert.equal(requests, 0)
+    })
+  })
+
+  it('requests readwrite permission for a prompt handle during user activation', async () => {
+    await withUserActivation(true, async () => {
+      const calls = []
+      const handle = {
+        queryPermission: async () => { calls.push('query'); return 'prompt' },
+        requestPermission: async (options) => {
+          calls.push('request')
+          assert.deepEqual(options, {mode: 'readwrite'})
+          return 'granted'
+        },
+      }
+      await mdFileWriter.ensureWritable(handle)
+      assert.deepEqual(calls, ['query', 'request'])
+    })
+  })
+
+  it('does not request or write a denied handle', async () => {
+    let requests = 0
     const handle = {
-      createWritable: async () => {
-        created = true
-        return {write: async () => {}, close: async () => {}}
-      },
+      queryPermission: async () => 'denied',
+      requestPermission: async () => { requests++; return 'denied' },
     }
-    await mdFileWriter.writeHandle(handle, 'draft')
-    assert.equal(created, true)
+    await assert.rejects(mdFileWriter.ensureWritable(handle), /写入权限已被拒绝/)
+    assert.equal(requests, 0)
+  })
+
+  it('requires a fresh user operation before requesting permission', async () => {
+    await withUserActivation(false, async () => {
+      let requests = 0
+      const handle = {
+        queryPermission: async () => 'prompt',
+        requestPermission: async () => { requests++; return 'granted' },
+      }
+      await assert.rejects(mdFileWriter.ensureWritable(handle), /必须由点击或键盘操作触发/)
+      assert.equal(requests, 0)
+    })
   })
 
   it('only exposes write-back when the MAIN-world writer is ready', () => {

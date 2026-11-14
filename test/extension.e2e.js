@@ -421,8 +421,13 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
     })
   })
   const picker = completeNativeFileAccess(filename, 'picker').then(() => page.bringToFront())
+  const preparePermission = completeNativeFileAccess(filename, 'write').then(() => page.bringToFront())
   await page.locator('#_editor-toggle').click()
-  await Promise.all([waitStatus(page, '已选择当前文件；之后保存不再选路径'), picker]).catch(async (error) => {
+  await Promise.all([
+    waitStatus(page, '已连接当前文件并确认写入权限；之后保存不再选路径'),
+    picker,
+    preparePermission,
+  ]).catch(async (error) => {
     console.error('prepare diagnostics', await page.evaluate(() => ({
       status: document.querySelector('#_editor-status')?.textContent,
       body: document.body.innerText.slice(-500),
@@ -456,6 +461,7 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   assert.equal(await page.locator('#_toc').count(), 1, 'Preview 编辑不应收起目录')
   assert.equal(await page.locator('body').evaluate((element) => element.classList.contains('_color-dark')), true)
   assert.equal(await hybridEditor.evaluate((element) => getComputedStyle(element).backgroundColor), 'rgba(0, 0, 0, 0)')
+  assert.equal(await page.locator('#_editor-export').count(), 0, '编辑工具条不应提供导出或下载按钮')
   await assertEditorLocation(page, firstReadingAnchor)
   const darkActiveBlock = await page.locator('#_hybrid-editor-input .md-block-active').evaluate((element) => ({
     color: getComputedStyle(element).color,
@@ -483,9 +489,8 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   const first = `# 已修改\n\n中文 IME\n\n${paragraphs}`
   await setPreviewContent(page, first, '已修改')
   assert.equal(await readDraft(bridge, pathToFileURL(filename).href), first)
-  const writePermission = completeNativeFileAccess(filename, 'write').then(() => page.bringToFront())
   await page.locator('#_editor-save').click()
-  await Promise.all([waitStatus(page, '已保存原文件'), writePermission]).catch(async (error) => {
+  await waitStatus(page, '已保存原文件').catch(async (error) => {
     console.error('first save diagnostics', await page.locator('#_editor-status').textContent(), errors)
     console.error('writer events', await page.evaluate(() => window.__writerEvents))
     await page.screenshot({path: path.join(work, 'first-save-failure.png')})
@@ -494,8 +499,25 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   assert.equal(fs.readFileSync(filename).equals(sourceBytes(first)), true, '首次保存必须覆盖真实磁盘并保留 BOM/CRLF')
   assert.equal(await page.locator('#_editor-save').isDisabled(), true)
   const writerEvents = await page.evaluate(() => window.__writerEvents)
-  assert.deepEqual(writerEvents.filter((event) => event.type === 'request').map((event) => event.prepare), [true, false])
-  assert.deepEqual(writerEvents.filter((event) => event.type === 'response').map((event) => event.detail.status), ['ready', 'written'])
+  assert.deepEqual(writerEvents.filter((event) => event.type === 'request').map((event) => event.prepare), [true, true, false])
+  assert.deepEqual(writerEvents.filter((event) => event.type === 'response').map((event) => event.detail.status), ['ready', 'ready', 'written'])
+
+  await bridge.evaluate(async (url) => {
+    const [tab] = await chrome.tabs.query({url})
+    await chrome.scripting.executeScript({
+      target: {tabId: tab.id},
+      func: () => {
+        editor.state.status = '保存失败：自动消退测试'
+        editorChanged()
+      },
+    })
+  }, pathToFileURL(filename).href)
+  await waitStatus(page, '保存失败：自动消退测试')
+  await page.waitForFunction(() => {
+    const controls = document.querySelector('#_editor-controls')
+    return document.querySelector('#_editor-status')?.textContent === '' &&
+      !controls.classList.contains('_visible') && !controls.classList.contains('_pinned')
+  }, undefined, {timeout: 8000})
 
   const second = `${first}\n第二次保存不选择路径。\n`
   await setPreviewContent(page, second, '第二次保存不选择路径')
@@ -509,8 +531,12 @@ test('真实 Edge：编辑、一次授权、句柄复用与冲突保护', {timeo
   await scrollToParagraph(page, secondReadingAnchor)
   const readingScroll = await page.evaluate(() => window.scrollY)
   await page.waitForSelector('#_editor-toggle')
+  const restoredPermission = completeNativeFileAccess(filename, 'write').then(() => page.bringToFront())
   await page.locator('#_editor-toggle').click()
-  await page.locator('#_hybrid-editor-input').waitFor({state: 'visible'})
+  await Promise.all([
+    page.locator('#_hybrid-editor-input').waitFor({state: 'visible'}),
+    restoredPermission,
+  ])
   await assertEditorLocation(page, secondReadingAnchor)
   const third = `${second}\n刷新后复用句柄。\n`
   await setPreviewContent(page, third, '刷新后复用句柄')

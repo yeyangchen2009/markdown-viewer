@@ -12,6 +12,25 @@ var mdFileWriter = (() => {
     }],
   })
 
+  var requireActivation = (operation) => {
+    if (navigator.userActivation && !navigator.userActivation.isActive) {
+      throw new Error(`${operation}必须由点击或键盘操作触发`)
+    }
+  }
+
+  var ensureWritable = async (handle) => {
+    var permission = await handle.queryPermission({mode: 'readwrite'})
+    if (permission === 'granted') return
+    if (permission === 'denied') {
+      throw new Error('当前文件的写入权限已被拒绝，请在浏览器设置中允许后重试')
+    }
+    requireActivation('文件写入授权')
+    permission = await handle.requestPermission({mode: 'readwrite'})
+    if (permission !== 'granted') {
+      throw new Error('没有获得当前文件的写入权限，草稿仍保留')
+    }
+  }
+
   var writeHandle = async (handle, content) => {
     var writable = await handle.createWritable()
     try {
@@ -58,7 +77,7 @@ var mdFileWriter = (() => {
   var prepare = (request) => send(request, true)
   var save = (request) => send(request, false)
 
-  return {REQUEST, RESPONSE, pickerOptions, canWrite, writeHandle, prepare, save}
+  return {REQUEST, RESPONSE, pickerOptions, canWrite, requireActivation, ensureWritable, writeHandle, prepare, save}
 })()
 
 if (typeof module !== 'undefined' && module.exports) {

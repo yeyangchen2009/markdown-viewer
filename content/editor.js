@@ -116,12 +116,12 @@ var mdEditor = (() => {
         state.active = true
         state.entered = true
         state.status = prepared.status === 'ready'
-          ? '已选择当前文件；之后保存不再选路径'
+          ? '已连接当前文件并确认写入权限；之后保存不再选路径'
           : (prepared.status === 'cancelled'
-            ? '未连接原文件；可编辑和导出，保存时可重新选择'
+            ? '未连接原文件；可在本页编辑，保存时可重新选择'
             : (prepared.status === 'failed'
-              ? `原文件连接失败：${prepared.error}；可编辑和导出`
-              : '当前文档只能导出副本，不能覆盖原文件'))
+              ? `原文件连接失败：${prepared.error}；可在本页编辑，保存时重试`
+              : '当前环境不能写回原文件；修改仅保留在本页'))
       }
       catch (err) {
         state.status = `读取失败：${err.message || err}`
@@ -185,7 +185,7 @@ var mdEditor = (() => {
     var save = async (force = false) => {
       if (state.saving || state.busy || !state.initialized) return
       if (options.canWrite && !options.canWrite()) {
-        state.status = '当前文档只能导出副本，不能覆盖原文件'
+        state.status = '当前环境不能写回原文件；修改仅保留在本页'
         notify()
         return {status: 'unsupported'}
       }
@@ -199,10 +199,23 @@ var mdEditor = (() => {
       var draft = state.draft
       var format = Object.assign({}, state.format)
       state.saving = true
-      state.status = '正在核对磁盘文件…'
+      state.status = '正在确认原文件写入权限…'
       notify()
 
       try {
+        var prepared = options.prepare
+          ? await options.prepare({
+            documentUrl: location.href.replace(/#.*$/, ''),
+            expectedName: options.filename,
+          })
+          : {status: 'ready'}
+        if (prepared.status === 'cancelled') {
+          state.status = '已取消连接原文件，草稿仍保留'
+          return prepared
+        }
+
+        state.status = '正在核对磁盘文件…'
+        notify()
         var current = await options.read()
         if (!force && !matchesDisk(current)) {
           state.external = current
@@ -246,20 +259,6 @@ var mdEditor = (() => {
       }
     }
 
-    var exportCopy = () => {
-      var blob = new Blob([serialize(state.draft, state.format)], {type: 'text/markdown;charset=utf-8'})
-      var url = URL.createObjectURL(blob)
-      var link = document.createElement('a')
-      link.href = url
-      link.download = options.filename || 'markdown.md'
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 0)
-      state.status = '已导出副本；原文件未修改'
-      notify()
-    }
-
     var beforeUnload = (event) => {
       if (!state.dirty && !state.saving) return
       event.preventDefault()
@@ -275,7 +274,6 @@ var mdEditor = (() => {
       loadExternal,
       keepDraft,
       save,
-      exportCopy,
       beforeUnload,
     }
   }
